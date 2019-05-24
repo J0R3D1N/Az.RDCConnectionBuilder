@@ -1,5 +1,6 @@
 [CmdletBinding()]
 Param (
+    [String]$Title,
     [Switch]$UsePublicIP
 )
 
