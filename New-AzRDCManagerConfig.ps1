@@ -1,5 +1,6 @@
 [CmdletBinding()]
 Param (
+    [String]$SubscriptionName = "ALL",
     [String]$Title,
     [Switch]$UsePublicIP
 )
@@ -7,9 +8,24 @@ Param (
 $RDGOutputFile = "$env:TEMP\$Title.rdg"
 
 $AllVMs = [Ordered]@{}
-Get-AzSubscription | ForEach-Object {
-    $sub = $_.Name
-    Select-AzSubscription -SubscriptionObject $_
+If ($SubscriptionName -eq "ALL") {
+    Get-AzSubscription | ForEach-Object {
+        $sub = $_.Name
+        Select-AzSubscription -SubscriptionObject $_ | Out-Null
+        $AllVMs.$sub = [Ordered]@{}
+        Get-AzResourceGroup | ForEach-Object {
+            $rg = $_.ResourceGroupName
+            [System.Collections.ArrayList]$AllVMs.$sub.$rg = @()
+            (Get-AzVM -ResourceGroupName $rg).Where{$_.StorageProfile.OsDisk.OsType -eq "Windows"} | ForEach-Object {
+                $AllVMs.$sub.$rg.Add($_) | Out-Null
+            }
+        }
+    }
+}
+Else {
+    $Subscription = Get-AzSubscription -SubscriptionName $SubscriptionName
+    $sub = $Subscription.Name
+    Select-AzSubscription -SubscriptionObject $Subscription | Out-Null
     $AllVMs.$sub = [Ordered]@{}
     Get-AzResourceGroup | ForEach-Object {
         $rg = $_.ResourceGroupName
@@ -63,7 +79,7 @@ Foreach ($sub in $AllVMs.Keys) {
             </properties>
         </group>
     "
-
+    Select-AzSubscription -Subscription $sub
     $subNode = $newRDGFile.ImportNode($subobject.group,$true)
     [void]$MainNode.AppendChild($subNode)
     $subGroup = $newRDGFile.RDCMan.File.Group | Where-Object {$_.properties.name -eq $sub}
@@ -73,7 +89,7 @@ Foreach ($sub in $AllVMs.Keys) {
             [XML]$rgobject = "
                 <group>
                     <properties>
-                        <expanded>true</expanded>
+                        <expanded>false</expanded>
                         <name>$rg</name>
                     </properties>
                 </group>
@@ -97,7 +113,11 @@ Foreach ($sub in $AllVMs.Keys) {
                         <comment>{2}</comment>
                     </server>
                 "
-                [XML]$vmObject = $vmInfo -f $IpAddress,$VM.Name,(New-Object PSObject -Property $VM.Tags | Out-String)
+                [System.Collections.ArrayList]$Tagdata = @()
+                $VM.Tags.Keys | Sort-Object | ForEach-Object {
+                    [Void]$Tagdata.Add(("{0}: {1}&#13;`r" -f $_,$VM.Tags[$_]))
+                }
+                [XML]$vmObject = $vmInfo -f $IpAddress,$VM.Name,($Tagdata | Out-String)
                 $vmNode = $newRDGFile.ImportNode($vmObject.server,$true)
                 [Void]$rgGroup.AppendChild($vmNode)
 
